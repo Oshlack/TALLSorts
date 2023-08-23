@@ -22,6 +22,6 @@ setup(
         "kaleido==0.2.1"
     ],
     entry_points={
-          "console_scripts": ["TALLSorts=TALLSorts.tallsorts:run"]
+        "console_scripts": ["TALLSorts=TALLSorts.tallsorts:run"]
     }
 )

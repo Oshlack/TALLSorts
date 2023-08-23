@@ -18,3 +18,4 @@ dependencies:
   - plotly=5.11.0
   - pip:
     - conorm==1.2.0
+    - pyensembl==2.2.9

@@ -31,6 +31,8 @@ import sys
 import gzip
 import pickle
 import csv
+import os
+from pyensembl import EnsemblRelease
 
 '''  Internal '''
 from TALLSorts.common import message, root_dir, create_dir
@@ -128,6 +130,15 @@ def run_predictions(ui, tallsorts):
     (at the ui.destination path)
 
     """
+
+    # determining if we need to re-label gene labels
+    if ui.genelabels == 'symbol':
+        ensembl_relabel = convert_symbols_to_ensembl(ui.samples.columns)
+        ui.samples = ui.samples.drop(ensembl_relabel['unconfirmed'], axis=1)
+        ui.samples.columns = [ensembl_relabel['confirmed'][i] for i in ui.samples.columns]
+
+    # filling in NaN all columns
+    ui.samples = ui.samples.fillna(0)
 
     # fitting the data (which runs the classifier)
     tallsorts = tallsorts.fit(ui.samples)
@@ -395,6 +406,66 @@ def gen_waterfall_distribution(calls_df, labelThreshDict=None, batch_name=None, 
     else:
         fig.show()
 
+
+def convert_symbols_to_ensembl(symb_list, path=False):
+    """
+    Converts gene symbols to Ensembl IDs for analysis, as TALLSorts required Ensembl IDs in its counts matrix.
+    Implements an iterative approach to ensure as many symbols are converted correctly to Ensembl IDs as possible, partially dealing with duplicate symbol entries.
+
+    ...
+
+    Parameters
+    __________
+    symb_list : tuple or list
+        List of gene symbols
+
+    Returns
+    __________
+    Dictionary of:
+        'confirmed': a dictionary with keys of gene symbol and values of EnsemblId
+        'unconfirmed': a list of gene symbols unable to be converted to EnsemblIds
+
+    Outputs
+    __________
+    String with number of confirmed and unconfirmed symbol-ID conversions.
+    """
+
+    # generate a pyensembl genome object
+    ensembl_data = EnsemblRelease(110)
+
+    confirmed = {}
+    unconfirmed = []
+    nonexistent = []
+    for i in symb_list:
+        try:
+            z = ensembl_data.genes_by_name(i.upper())
+            if len(z) == 1:
+                confirmed[i] = z[0].gene_id
+            else:
+                unconfirmed.append(i)
+        except:
+            nonexistent.append(i)
+            continue
+    
+    # process of elimination
+    fixed = 1
+    print(f'Unconfirmed: {len(unconfirmed)}')
+    while fixed > 0:
+        fixed = 0
+        unconfirmed2 = []
+        for i in unconfirmed:
+            z = ensembl_data.genes_by_name(i.upper())
+            y = [i for i in z if i not in confirmed.values()]
+            if len(y) == 1:
+                confirmed[i] = y[0]
+                fixed += 1
+            else:
+                unconfirmed2.append(i)
+        unconfirmed = unconfirmed2.copy()
+    unconfirmed += nonexistent
+                
+    print(f'Ensembl IDs found for {len(confirmed)} out of {len(symb_list)} genes.')
+    return {'confirmed':confirmed, 'unconfirmed':unconfirmed}
 
 
 ''' --------------------------------------------------------------------------------------------------------------------

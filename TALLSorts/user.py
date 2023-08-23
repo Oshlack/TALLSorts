@@ -35,6 +35,9 @@ class UserInput:
             self.samples = self.input.samples
             self.counts = False if not self.input.counts else True
 
+            '''Gene labels'''
+            self.genelabels = self.input.genelabels if self.input.genelabels else 'id'
+
             '''Prediction Parameters '''
             self.destination = False if not self.input.destination else self.input.destination
 
@@ -60,6 +63,12 @@ class UserInput:
 
                                   Note: hg19 only supported currently, use other references at own risk."""))
 
+        cli.add_argument('-genelabels', '-gl',
+                         required=False,
+                         help=("""Whether your gene labels are in Ensembl ID or Gene Symbol form. Defaults to Ensembl ID.
+                               'id' (default): Ensembl ID
+                               'symbol': Gene symbol"""))
+
         cli.add_argument('-destination', '-d',
                          required=False,
                          help=("""Path to where you want the final report to be saved."""))
@@ -75,6 +84,10 @@ class UserInput:
     def _input_checks(self):
         if not self.destination:
             message("Error: a destination (-d /path/to/output/) is required. Exiting.")
+            sys.exit()
+        
+        if self.genelabels not in ('id', 'symbol'):
+            message("Error: Please supply a valid argument for -genelabels (either 'id' or 'symbol'). Exiting.")
             sys.exit()
 
     def _load_samples(self):
