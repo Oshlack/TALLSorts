@@ -12,7 +12,6 @@ setup(
     license="MIT",
     packages=["TALLSorts", *modules],
     zip_safe=False,
-    include_package_data=True,
     install_requires=[
         "joblib==1.2.0",
         "matplotlib==3.6.2",

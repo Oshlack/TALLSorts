@@ -166,6 +166,8 @@ def run_predictions(ui, tallsorts):
     message("Finished. Thanks for using TALLSorts!")
 
 def gen_multicall_csv(multi_calls, sample_order, path):
+    if not multi_calls:
+        return None
     max_multicall = max([len(multi_calls[i]) for i in multi_calls])
     with open(path, 'w') as f:
         csvwriter = csv.writer(f, delimiter=',')
@@ -176,6 +178,7 @@ def gen_multicall_csv(multi_calls, sample_order, path):
                 to_write += [call[0], round(call[1],3)]
             to_write += ['' for i in range(2*max_multicall-len(to_write))]
             csvwriter.writerow(to_write)
+    return None
 
 def get_figures(results, destination, plots=["prob_scatter", "waterfalls"]):
 
