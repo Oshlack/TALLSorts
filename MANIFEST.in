@@ -1,1 +1,1 @@
-include TALLSorts/models/tallsorts/*
+graft TALLSorts

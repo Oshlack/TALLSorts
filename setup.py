@@ -11,6 +11,7 @@ setup(
     author="Allen Gu, Breon Schmidt",
     license="MIT",
     packages=["TALLSorts", *modules],
+    include_package_data=True,
     zip_safe=False,
     install_requires=[
         "joblib==1.2.0",
