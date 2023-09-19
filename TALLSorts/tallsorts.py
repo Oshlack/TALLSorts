@@ -42,20 +42,13 @@ from TALLSorts.user import UserInput
 Global Variables
 ---------------------------------------------------------------------------------------------------------------------'''
 
-label_colours = {
-	'BCL11B':'#222222',
-	'HOXA_KMT2A':'#F9DA49',
-	'HOXA_MLLT10':'#91D44B',
-	'NKX2':'#8E3CCE', 
-	'TAL':'#DF3524',
-	'TLX1':'#367BD8',
-	'TLX3':'#57BFE0',
-	'Diverse':'#ED75B2',
-	'Unclassified':'#808080'
-}
-
-label_list = ['BCL11B', 'HOXA_KMT2A', 'HOXA_MLLT10', 'NKX2', 'TAL', 'TLX1', 'TLX3', 'Diverse']
-label_list_unclassified = label_list + ['Unclassified']
+tallsorts_asci = """                                                            
+   .--------. ,---.  ,--.   ,--.    ,---.                  ,--.         
+   '--.  .--'/  O  \ |  |   |  |   '   .-'  ,---. ,--.--.,-'  '-. ,---. 
+      |  |  |  .-.  ||  |   |  |   `.  `-. | .-. ||  .--''-.  .-'(  .-' 
+      |  |  |  | |  ||  '--.|  '--..-'    |' '-' '|  |     |  |  .-'  `)
+      `--'  `--' `--'`-----'`-----'`-----'  `---' `--'     `--'  `----' 
+    """
 
 ''' --------------------------------------------------------------------------------------------------------------------
 Functions
@@ -83,7 +76,6 @@ def run(ui=False):
     # run predictions
     run_predictions(ui, tallsorts)
 
-
 def load_classifier(path=False):
     """
     Load the TALLSorts classifier from a pickled file.
@@ -102,12 +94,12 @@ def load_classifier(path=False):
     """
 
     if not path:
-        path = str(root_dir()) + "/models/tallsorts/tallsorts.pkl.gz"
+        path = str(root_dir()) + "/models/tallsorts/tallsorts_default_model.pkl.gz"
 
     message("Loading classifier...")
-    tallsorts = joblib.load(path)
+    with gzip.open(path, 'rb') as f:
+        tallsorts = pickle.load(f)
     return tallsorts
-
 
 def run_predictions(ui, tallsorts):
     """
@@ -122,12 +114,13 @@ def run_predictions(ui, tallsorts):
 
     Output
     __________
-    Probabilities.csv
-    Predictions.csv
-    Multi_calls.csv
-    Distributions.png and html
-    Waterfalls.png and html
-    (at the ui.destination path)
+    Directories corresponding to hierarchy levels. Each directory contains:
+        Probabilities.csv
+        Predictions.csv
+        Multi_calls.csv
+        Distributions.png and html
+        Waterfalls.png and html
+        (at the ui.destination path)
 
     """
 
@@ -140,28 +133,32 @@ def run_predictions(ui, tallsorts):
     # filling in NaN all columns
     ui.samples = ui.samples.fillna(0)
 
-    # fitting the data (which runs the classifier)
-    tallsorts = tallsorts.fit(ui.samples)
+    # running the classifier
     results = tallsorts.predict(ui.samples)
 
     # writing the probabilities to a CSV
-    results.probs_raw_df.round(3).to_csv(f'{ui.destination}/probabilities.csv', index_label='Sample')
+    for level in results.levels:
+        level_cleaned = clean_label(level)
+        create_dir(f'{ui.destination}/{level_cleaned}')
+        results.levels[level]['probs_raw_df'].round(3).to_csv(f'{ui.destination}/{level_cleaned}/probabilities.csv', index_label='Sample')
 
-    # writing the highest predictions to a CSV
-    pred_csv = results.calls_df[["y_pred"]].copy()
-    pred_csv.columns = ["Predictions"]
-    pred_csv.to_csv(f'{ui.destination}/predictions.csv', index_label='Sample')
+        # writing the highest predictions to a CSV
+        pred_csv = results.levels[level]['calls_df'][["y_pred"]].copy()
+        pred_csv.columns = ["Predictions"]
+        pred_csv.to_csv(f'{ui.destination}/{level_cleaned}/predictions.csv', index_label='Sample')
 
-    # writing multi calls to a CSV
-    sample_order = sorted(results.multi_calls.keys(), key=lambda x: ui.samples.index.to_list().index(x))
-    gen_multicall_csv(results.multi_calls, sample_order, f'{ui.destination}/multi_calls.csv')
+        # writing multi calls to a CSV
+        sample_order = sorted(results.levels[level]['multi_calls'].keys(), key=lambda x: ui.samples.index.to_list().index(x))
+        gen_multicall_csv(results.levels[level]['multi_calls'], sample_order, f'{ui.destination}/{level_cleaned}/multi_calls.csv')
 
-    if ui.counts:
-        message("Saving normalised/standardised counts.")
-        processed_counts = results.transform(ui.samples)
-        processed_counts["counts"].to_csv(ui.destination + "/processed_counts.csv")
+        if ui.counts:
+            message("Saving normalised/standardised counts.")
+            processed_counts = results.transform(ui.samples)
+            processed_counts["counts"].to_csv(f'{ui.destination}/{level_cleaned}/processed_counts.csv')
 
-    get_figures(results, ui.destination)
+        get_figures(results_level=results.levels[level], 
+                    destination=f'{ui.destination}/{level_cleaned}', 
+                    label_list=get_children_of_label(tallsorts['clf'].subtypeObjects, level))
 
     message("Finished. Thanks for using TALLSorts!")
 
@@ -180,7 +177,7 @@ def gen_multicall_csv(multi_calls, sample_order, path):
             csvwriter.writerow(to_write)
     return None
 
-def get_figures(results, destination, plots=["prob_scatter", "waterfalls"]):
+def get_figures(results_level, destination, label_list, plots=["prob_scatter", "waterfalls"]):
 
     """
     Make figures of the results.
@@ -210,17 +207,16 @@ def get_figures(results, destination, plots=["prob_scatter", "waterfalls"]):
     for plot in plots:
 
         if plot == "prob_scatter":
-            dist_plot = gen_sample_wise_prob_plot(results.probs_raw_df, results.calls_df, labelThreshDict=None, batch_name=None, figsize=(800,600), return_plot=True)
+            dist_plot = gen_sample_wise_prob_plot(results_level['probs_raw_df'], results_level['calls_df'], label_list, labelThreshDict=None, batch_name=None, figsize=(800,600), return_plot=True)
             dist_plot.write_image(destination + "/prob_scatters.png", scale=2, engine="kaleido")
             dist_plot.write_html(destination + "/prob_scatters.html")
 
         if plot == "waterfalls":
-            waterfall_plot = gen_waterfall_distribution(results.calls_df, labelThreshDict=None, batch_name=None, return_plot=True)
+            waterfall_plot = gen_waterfall_distribution(results_level['calls_df'], label_list, labelThreshDict=None, batch_name=None, return_plot=True)
             waterfall_plot.write_image(destination + "/waterfalls.png", scale=2, engine="kaleido")
             waterfall_plot.write_html(destination + "/waterfalls.html")
-
         
-def gen_sample_wise_prob_plot(probs_raw_df, calls_df, labelThreshDict=None, batch_name=None, figsize=(800,600), return_plot=False):
+def gen_sample_wise_prob_plot(probs_raw_df, calls_df, label_list, labelThreshDict=None, batch_name=None, figsize=(800,600), return_plot=False):
     """
     Given a set of predicted probabilities, generate a figure displaying distributions of probabilities. Analogous to `predict_dist` in ALLSorts.
 
@@ -236,6 +232,8 @@ def gen_sample_wise_prob_plot(probs_raw_df, calls_df, labelThreshDict=None, batc
     calls_df : Pandas DataFrame
         A DataFrame with information about the top calls. Columns are: y_highest (highest call); proba_raw; proba_adj; y_pred (predicted call); multi_call (bool)
         Note that y_pred can be 'Unclassified', but y_highest will always be one of the labels.
+    label_list: list
+        List of labels
     labelThreshDict : dict
         Dict of thresholds with labels as keys and threshold as values. Currently not used.
     batch_name : str
@@ -269,7 +267,6 @@ def gen_sample_wise_prob_plot(probs_raw_df, calls_df, labelThreshDict=None, batc
         sample_row = probs_raw_df.loc[sample]
         x = list(range(len(sample_row.index)))
         y = sample_row.to_list()
-        colour = [label_colours[i] for i in sample_row.index]
         customdata = [[sample, i] for i in sample_row.index]
         fig.add_trace(go.Bar(x=x, y=y, width=0.9, 
                             marker={'color':'#90ee90'}, showlegend=False, visible=False,
@@ -338,14 +335,12 @@ def gen_sample_wise_prob_plot(probs_raw_df, calls_df, labelThreshDict=None, batc
     else:
         fig.show()
 
-
-def gen_waterfall_distribution(calls_df, labelThreshDict=None, batch_name=None, figsize=(1200,600), return_plot=False):
+def gen_waterfall_distribution(calls_df, label_list, labelThreshDict=None, batch_name=None, figsize=(1200,600), return_plot=False):
 
     """
     Given a set of predicted probabilities, generate a figure displaying the decreasing probabilities per sample. Analagous to `predict_waterfalls` and `_plot_waterfall` in ALLSorts
 
-    This depiction is useful to compare probabilities more directly, in an ordered way, as to judge the efficacy
-    of the classification attempt.
+    This depiction is useful to compare probabilities more directly, in an ordered way, as to judge the efficacy of the classification attempt.
 
     See https://github.com/Oshlack/TAllSorts/ for examples.
 
@@ -367,6 +362,9 @@ def gen_waterfall_distribution(calls_df, labelThreshDict=None, batch_name=None, 
 
     if labelThreshDict is None:
         labelThreshDict = {i:0.5 for i in label_list}
+
+    label_list_unclassified = label_list + ['Unclassified']
+    label_colours = get_colours_for_labels(label_list_unclassified)
 
     waterfallDf = calls_df.copy()
     waterfallDf.sort_values('proba_adj', inplace=True, ascending=False)
@@ -409,6 +407,10 @@ def gen_waterfall_distribution(calls_df, labelThreshDict=None, batch_name=None, 
     else:
         fig.show()
 
+
+    """
+    The following functions are utility functions used in this script.
+    """
 
 def convert_symbols_to_ensembl(symb_list, path=False):
     """
@@ -470,15 +472,64 @@ def convert_symbols_to_ensembl(symb_list, path=False):
     print(f'Ensembl IDs found for {len(confirmed)} out of {len(symb_list)} genes.')
     return {'confirmed':confirmed, 'unconfirmed':unconfirmed}
 
+def get_children_of_label(subtypeObjects, label_name):
+    # A label name of the form "Level_num_parent"
+    label_name_components = label_name.split('_')
+    level_num = int(label_name_components[1])
+    parent_label = '_'.join(label_name_components[2:])
 
-''' --------------------------------------------------------------------------------------------------------------------
-Global Variables
----------------------------------------------------------------------------------------------------------------------'''
+    if level_num == 1:
+        return sorted([i for i in subtypeObjects if subtypeObjects[i].level == 1])
+    parent_obj = subtypeObjects[parent_label]
+    return [i.label for i in parent_obj.children]
 
-tallsorts_asci = """                                                            
-   .--------. ,---.  ,--.   ,--.    ,---.                  ,--.         
-   '--.  .--'/  O  \ |  |   |  |   '   .-'  ,---. ,--.--.,-'  '-. ,---. 
-      |  |  |  .-.  ||  |   |  |   `.  `-. | .-. ||  .--''-.  .-'(  .-' 
-      |  |  |  | |  ||  '--.|  '--..-'    |' '-' '|  |     |  |  .-'  `)
-      `--'  `--' `--'`-----'`-----'`-----'  `---' `--'     `--'  `----' 
+def clean_label(label):
+    label = str(label)
+    label = label.replace('/', '_')
+    return label
+
+def get_colours_for_labels(label_list, use_default=True):
     """
+    Generates a dict of labels with their associated colours to show in waterfall figures
+
+    Parameters
+    __________
+    label_list: list of labels
+    use_default: bool
+        Whether or not to use the default_label_colours for labels defined by the default tallsorts model
+
+    Returns
+    __________
+    Dict containing label:rgb key pairs
+    """
+
+    default_label_colours = {
+        'BCL11B':'#222222',
+        'HOXA_KMT2A':'#F9DA49',
+        'HOXA_MLLT10':'#91D44B',
+        'NKX2':'#8E3CCE', 
+        'TAL/LMO':'#DF3524',
+        'TLX1':'#367BD8',
+        'TLX3':'#57BFE0',
+        'Diverse':'#ED75B2',
+        'Unclassified':'#808080',
+        'TAL2':'#E88E8E',
+    }
+    label_colours = {}
+    unaccounted_labels = []
+    if use_default:
+        for i in label_list:
+            if i in default_label_colours:
+                label_colours[i] = default_label_colours[i]
+            else:
+                unaccounted_labels.append(i)
+    else:
+        unaccounted_labels = [i for i in label_list]
+    if unaccounted_labels:
+        import colorsys
+        unaccounted_hues = [colorsys.hsv_to_rgb(i,1,1) for i in np.linspace(0,1,len(unaccounted_labels))]
+        for i in range(len(unaccounted_labels)):
+            label_colours[unaccounted_labels[i]] = unaccounted_hues[i]
+    
+    return label_colours
+    

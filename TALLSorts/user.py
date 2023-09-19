@@ -86,11 +86,10 @@ class UserInput:
             message("Error: a destination (-d /path/to/output/) is required. Exiting.")
             sys.exit()
         
-        if self.genelabels not in ('id', 'symbol'):
+        if self.genelabels and self.genelabels not in ('id', 'symbol'):
             message("Error: Please supply a valid argument for -genelabels (either 'id' or 'symbol'). Exiting.")
             sys.exit()
 
     def _load_samples(self):
-
         if self.samples:
             self.samples = pd.read_csv(self.samples, index_col=0, header=0)

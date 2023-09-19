@@ -55,7 +55,7 @@ class TALLSorts(Pipeline):
 
 	"""
 
-	def __init__(self, steps, memory=None, verbose=False):
+	def __init__(self, steps, memory=None, verbose=False, is_default_model=True):
 
 		"""
 		Initialise the class
@@ -73,6 +73,7 @@ class TALLSorts(Pipeline):
 		self.steps = steps
 		self.memory = memory
 		self.verbose = verbose
+		self.is_default_model = is_default_model
 		self._validate_steps()
 
 	def transform(self, X):
