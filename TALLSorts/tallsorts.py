@@ -32,11 +32,20 @@ import gzip
 import pickle
 import csv
 import os
+import conorm
 from pyensembl import EnsemblRelease
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from joblib import Parallel, delayed, parallel_backend  
 
 '''  Internal '''
 from TALLSorts.common import message, root_dir, create_dir
 from TALLSorts.user import UserInput
+from TALLSorts.stages.subtype_class import SubtypeClass, reconstructSubtypeObj, genSubtypeObjsFromHierarchy, gen_hierarchy_dict
+from TALLSorts.stages.scaling import scaleForTesting, createScaler
+from TALLSorts.stages.classifier import Classifier
+from TALLSorts.pipeline import TALLSorts
 
 ''' --------------------------------------------------------------------------------------------------------------------
 Global Variables
@@ -71,10 +80,23 @@ def run(ui=False):
 
     # create output directory
     create_dir(ui.destination)
-    # load classifier
-    tallsorts = load_classifier()
-    # run predictions
-    run_predictions(ui, tallsorts)
+
+    # determining if we need to re-label gene labels
+    if ui.gene_labels == 'symbol':
+        ensembl_relabel = convert_symbols_to_ensembl(ui.samples.columns)
+        ui.samples = ui.samples.drop(ensembl_relabel['unconfirmed'], axis=1)
+        ui.samples.columns = [ensembl_relabel['confirmed'][i] for i in ui.samples.columns]
+
+    # filling in NaN all columns
+    ui.samples = ui.samples.fillna(0)
+
+    if ui.mode == 'test':
+        # run predictions
+        tallsorts = load_classifier(ui.model_path) if ui.model_path else load_classifier()
+        run_predictions(ui, tallsorts)
+    elif ui.mode == 'train':
+        # train classifier
+        fit_classifier(ui, n_jobs=ui.training_cores)
 
 def load_classifier(path=False):
     """
@@ -124,15 +146,6 @@ def run_predictions(ui, tallsorts):
 
     """
 
-    # determining if we need to re-label gene labels
-    if ui.genelabels == 'symbol':
-        ensembl_relabel = convert_symbols_to_ensembl(ui.samples.columns)
-        ui.samples = ui.samples.drop(ensembl_relabel['unconfirmed'], axis=1)
-        ui.samples.columns = [ensembl_relabel['confirmed'][i] for i in ui.samples.columns]
-
-    # filling in NaN all columns
-    ui.samples = ui.samples.fillna(0)
-
     # running the classifier
     results = tallsorts.predict(ui.samples)
 
@@ -151,16 +164,26 @@ def run_predictions(ui, tallsorts):
         sample_order = sorted(results.levels[level]['multi_calls'].keys(), key=lambda x: ui.samples.index.to_list().index(x))
         gen_multicall_csv(results.levels[level]['multi_calls'], sample_order, f'{ui.destination}/{level_cleaned}/multi_calls.csv')
 
-        if ui.counts:
-            message("Saving normalised/standardised counts.")
-            processed_counts = results.transform(ui.samples)
-            processed_counts["counts"].to_csv(f'{ui.destination}/{level_cleaned}/processed_counts.csv')
+        # if ui.counts: # currently not implemented
+        #     message("Saving normalised/standardised counts.")
+        #     processed_counts = results.transform(ui.samples)
+        #     processed_counts["counts"].to_csv(f'{ui.destination}/{level_cleaned}/processed_counts.csv')
 
         get_figures(results_level=results.levels[level], 
                     destination=f'{ui.destination}/{level_cleaned}', 
                     label_list=get_children_of_label(tallsorts['clf'].subtypeObjects, level))
-
+    
     message("Finished. Thanks for using TALLSorts!")
+    sys.exit()
+
+    # TALLSorts is in train mode
+    
+
+    message("Finished training. Thanks for using TALLSorts!")
+
+"""
+The following are functions used in the process of classifying objects
+"""
 
 def gen_multicall_csv(multi_calls, sample_order, path):
     if not multi_calls:
@@ -525,11 +548,223 @@ def get_colours_for_labels(label_list, use_default=True):
                 unaccounted_labels.append(i)
     else:
         unaccounted_labels = [i for i in label_list]
+
     if unaccounted_labels:
         import colorsys
-        unaccounted_hues = [colorsys.hsv_to_rgb(i,1,1) for i in np.linspace(0,1,len(unaccounted_labels))]
+        def rgb_to_hex(rgb):
+            hex_code = '#'
+            hex_raw = [hex(int(i*255))[2:].upper() for i in rgb]
+            for i in hex_raw:
+                hex_code += '0'+i if len(i)<2 else i
+            return hex_code
+        
+        unaccounted_hues = [rgb_to_hex(colorsys.hsv_to_rgb(i,1,1)) for i in np.linspace(0,1,len(unaccounted_labels)+1)]
         for i in range(len(unaccounted_labels)):
             label_colours[unaccounted_labels[i]] = unaccounted_hues[i]
-    
+        
     return label_colours
+
     
+
+"""
+The following are functions used in fitting a model
+"""
+def fit_classifier(ui, n_jobs=1):
+    X = ui.samples
+    sample_sheet = ui.sample_sheet
+    hierarchy = ui.hierarchy
+    training_params = ui.training_params
+    destination = ui.destination
+
+    message("Checking validity of input files.")
+    check_hierarchy(hierarchy)
+    subtypeObjects = genSubtypeObjsFromHierarchy(hierarchy)
+    check_training_inputs(X, sample_sheet, subtypeObjects)
+    logreg_params = gen_logreg_params(training_params, subtypeObjects)
+    scalers = {}
+    clfs = {}
+
+    message("Training classifier. This could take some time...")
+
+    ### creating the scalers
+    ###
+
+    def create_scalers(X, parent_label):
+        if parent_label == 'Level0':
+            children_labels = [i for i in subtypeObjects if subtypeObjects[i].level == 1]
+        else:
+            subset_samples = sample_sheet.index[sample_sheet[parent_label] == 1]
+            X = X.loc[subset_samples]
+            children_labels = [i.label for i in subtypeObjects[parent_label].children]
+
+        min_subtype = min([sum(sample_sheet.loc[X.index][label] == 1) for label in children_labels])
+        X = X[filter_genes(X, min_subtype)]
+        scalers[parent_label] = createScaler(X)
+    
+    parent_labels = ['Level0'] + sorted([i for i in subtypeObjects if subtypeObjects[i].children], key=lambda x:subtypeObjects[x].level)
+    with parallel_backend('threading', n_jobs=n_jobs):
+        Parallel(verbose=0)(delayed(create_scalers)(X, parent_label) for parent_label in parent_labels)
+
+    ### performing model training
+    ###
+
+    def performing_training(X, label, logreg_params):
+        # training model (note this is specific to label)
+        parent_label = subtypeObjects[label].parent.label if subtypeObjects[label].parent else 'Level0'
+        if parent_label != 'Level0':
+            subset_samples = sample_sheet.index[sample_sheet[parent_label] == 1]
+            X_subset = X.loc[subset_samples]
+        else:
+            X_subset = X.copy()
+        scaler = scalers[parent_label]
+        X_train = scaleForTesting(X_subset, scaler)
+        y_train = sample_sheet.loc[X_train.index][label] == 1
+        # logreg_params: random_state=0, max_iter=10000, tol=0.0001, penalty='l1', solver='saga', C=0.2, class_weight='balanced'
+        logreg = LogisticRegression(**logreg_params)
+        clf = logreg.fit(X_train, y_train)
+        subtypeObjects[label].clf = clf
+        print(f'Trained label {label}')
+
+    with parallel_backend('threading', n_jobs=n_jobs):
+        Parallel(verbose=1)(delayed(performing_training)(X, label, logreg_params[label]) for label in subtypeObjects)
+
+    ### completing training and saving model
+    ###
+
+    custom_model = {
+        'hierarchy':gen_hierarchy_dict(subtypeObjects),
+        'scalers':scalers,
+        'clfs':{i:subtypeObjects[i].clf for i in subtypeObjects},
+        'is_default':False
+    }
+
+    steps = [('clf', Classifier(tallsorts_model_dict=custom_model))]
+    tallsorts = TALLSorts(steps)
+
+    with gzip.open(f'{destination}/custom.pkl.gz', 'wb') as f:
+        pickle.dump(tallsorts, f)
+
+    message("Finished. You can find the custom model in the directory you sepcified.")
+    sys.exit()
+
+def check_hierarchy(hierarchy):
+    if 'Parent' not in hierarchy.columns:
+        message(f"Error: Hierarchy file does not contain 'Parent' as a column title. Exiting.")
+        sys.exit()
+
+    duplicate_labels = hierarchy.index.value_counts()[hierarchy.index.value_counts() > 1]
+    if duplicate_labels.shape[0] > 0:
+        message(f"Error: Label '{duplicate_labels.index[0]}' appears at least twice in the first column of the hierarchy file. Exiting.")
+        sys.exit()
+
+    for i in hierarchy['Parent']:
+        if i and i not in hierarchy.index:
+            message(f"Error: {i} is listed as a parent label, but does not exist as its own label. Exiting.")
+            sys.exit()
+
+
+def check_training_inputs(X, sample_sheet, subtypeObjects):
+    """
+    Various checks to make sure that X, sample_sheet, and subtypeObjects are mutually compatible, specifically ensuring samples and labels all match up.
+    """
+    # check all samples in X are listed in the sample_sheet
+    for i in X.index:
+        if i not in sample_sheet.index:
+            message(f"Error: Sample '{i}' is in the counts matrix but not in the sample sheet. Exiting.")
+            sys.exit()
+
+    # check all sample_sheet labels are unique
+    duplicate_labels =  sample_sheet.columns.value_counts()[sample_sheet.columns.value_counts() > 1]
+    if duplicate_labels.shape[0] > 0:
+        message(f"Error: Label '{duplicate_labels.index[0]}' appears at least twice in the headers of the sample-sheet file. Exiting.")
+        sys.exit()
+    
+    # check all sample_sheet labels are within the hierarchy
+    for i in sample_sheet.columns:
+        if i not in subtypeObjects:
+            message(f"Error: Subtype label '{i}' is in the sample sheet but not in the hierarchy. Exiting.")
+            sys.exit()
+
+    # check that every sample, if will be sent to further classifier, has positives for all parents
+    max_levels = max([subtypeObjects[i].level for i in subtypeObjects])
+    for sample in sample_sheet.index:
+        true_classifications = sample_sheet.loc[sample]
+        positive_labels =  true_classifications[true_classifications > 0.5].index
+        for label in positive_labels:
+            cur_label = label
+            for level in range(max_levels):
+                if subtypeObjects[cur_label].parent is None:
+                    break
+                if subtypeObjects[cur_label].parent.label not in positive_labels:
+                    message(f"Error: Sample '{sample}' is positive for '{cur_label}' but negative for its parent '{subtypeObjects[cur_label].parent.label}'. Exiting.")
+                    sys.exit()
+                cur_label = subtypeObjects[cur_label].parent.label
+
+def gen_logreg_params(training_params, subtypeObjects):
+    default_params = dict(random_state=0, max_iter=10000, tol=0.0001, penalty='l1', solver='saga', C=0.2, class_weight='balanced')
+    param_modifiers = dict(random_state=int, max_iter=int, tol=float, penalty=str, solver=str, C=float, class_weight=str)
+    logreg_params = {}
+    if training_params is None:
+        logreg_params = {i:default_params.copy() for i in subtypeObjects}
+        return logreg_params
+
+    for label in subtypeObjects:
+        logreg_params[label] = default_params.copy()
+        if label in training_params.index:
+            row = training_params.loc[label]
+            for property in row.index:
+                if row[property]:
+                    logreg_params[label][property] = param_modifiers[property](row[property])
+    
+    return logreg_params
+
+def filter_genes(X, min_subtype, verbose=True):
+    ensembl_data = EnsemblRelease(110)
+    
+    candidate_genes = X.columns
+    if verbose:
+        message(f'There are {len(candidate_genes)} genes initially.')
+
+    ### Removing genes not in the annotation set
+    not_found = []
+    for i in candidate_genes:
+        try:
+            ensembl_data.gene_by_id(i)
+        except:
+            not_found.append(i)
+    candidate_genes = [i for i in candidate_genes if i not in not_found]
+    if verbose:
+        message(f'Removed genes not in the annotation set. There are now {len(candidate_genes)} genes.')
+
+    ### Removing Y-chromosome genes and XIST
+    Y = ensembl_data.gene_ids(contig='Y') + [ensembl_data.genes_by_name('XIST')[0].gene_id]
+    candidate_genes = [i for i in candidate_genes if i not in Y]
+    if verbose:
+        message(f'Removed Y-chromosome and XIST genes. There are now {len(candidate_genes)} genes.')
+    
+    ### Removing noncoding genes and pseudogenes
+    categories_to_keep = ['protein_coding']
+    candidate_genes = [i for i in candidate_genes if ensembl_data.gene_by_id(i).biotype in categories_to_keep]
+    if verbose:
+        message(f'Removed There are {len(candidate_genes)} coding genes remaining.')
+
+    ### Removing mitochondrial genes
+    MT = [i for i in candidate_genes if ensembl_data.gene_by_id(i).contig == 'MT']
+    candidate_genes = [i for i in candidate_genes if i not in MT]
+    if verbose:
+        message(f'Removed mitochondrial genes. There are now {len(candidate_genes)} genes.')
+    
+    ### Converting to CPM
+    X_cpm = conorm.cpm(X.transpose()).transpose()
+    
+    ### Remove all genes that have fewer than 5 counts in fewer samples than the smallest subtype
+    cpm_threshold = 5/min(X.sum(axis=1)) * 1e6
+    to_remain = X.columns[(X_cpm >= cpm_threshold).sum(axis=0) >= min_subtype]
+    candidate_genes = [i for i in candidate_genes if i in to_remain]
+    if verbose:
+        message(f'Candidate genes remaining: {len(candidate_genes)}')
+    
+    ### sorting
+    candidate_genes.sort()
+
+    return candidate_genes

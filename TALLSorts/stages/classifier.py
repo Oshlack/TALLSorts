@@ -19,7 +19,6 @@ from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.linear_model import LogisticRegression
 import pandas as pd
 import numpy as np
-from joblib import Parallel, delayed, parallel_backend  
 
 ''' --------------------------------------------------------------------------------------------------------------------
 Classes
@@ -54,7 +53,7 @@ class Classifier(BaseEstimator, ClassifierMixin):
         Note that this is not the typical output of a sklearn predict function.
 
     """
-    def __init__(self, tallsorts_model_dict, n_jobs=1, labelThreshDict=None):
+    def __init__(self, tallsorts_model_dict, labelThreshDict=None):
         """
         Initialise the class
 
@@ -65,36 +64,26 @@ class Classifier(BaseEstimator, ClassifierMixin):
             'hierarchy': the setup of the hierarchical model. A dict of label:(parent,level) pairs
             'subtypeObjects':objects of SubtypeClass. Contains the LogReg classifier and scaler for that model, along with hierarchical information
         n_jobs : int
-            How many threads to use to train the classifier(s) concurrently. Currently a placeholder. For use when training is implemented.
+            How many threads to use to train the classifier(s) concurrently.
         labelThreshDict : dict
             Dict of thresholds with labels as keys and threshold as values. Currently not used.
         **to add: params for use with the model.
         """
         self.hierarchy = tallsorts_model_dict['hierarchy']
-        self.hierarchy_flat = [i for i in self.hierarchy]
-        self.subtypeObjects = reconstructSubtypeObj(tallsorts_model_dict['subtypeObjectDeconstructed'], self.hierarchy)
-        self.clfDict = {label:self.subtypeObjects[label].clf for label in self.hierarchy}
-        self.n_jobs = n_jobs
+        self.scalers = tallsorts_model_dict['scalers']
+        self.clfs = tallsorts_model_dict['clfs']
+
+        self.subtypeObjects = reconstructSubtypeObj(tallsorts_model_dict)
+
         if labelThreshDict is None:
-            self.labelThreshDict = {i:0.5 for i in self.hierarchy_flat}
+            self.labelThreshDict = {i:0.5 for i in self.hierarchy}
         else:
             self.labelThreshDict = labelThreshDict
 
     def __str__(self):
         return('A TALLSorts model object')
-
+    
     def fit(self, X, y):
-        if y is not None:
-            # will parallelise this at some point
-            def performing_training(label_test):
-                y_train = pd.Series(y) == label_test
-                logreg = LogisticRegression(random_state=0, max_iter=10000, tol=0.0001, penalty='l1', solver='saga', C=0.2, class_weight='balanced')
-                clf = logreg.fit(X, y_train)
-                self.clfDict[label_test] = clf
-            
-            with parallel_backend('threading', n_jobs=self.n_jobs):
-                Parallel(verbose=1)(delayed(performing_training)(label) for label in self.label_list)
-            
         return self
 
     def predict(self, X):
@@ -126,7 +115,10 @@ class Classifier(BaseEstimator, ClassifierMixin):
 
         # iterating the testing process by levels
         for level in range(1, max([self.hierarchy[i][1] for i in self.hierarchy])+1):
-            unique_parents = set([self.hierarchy[i][0] for i in self.hierarchy if self.hierarchy[i][1]==level])
+            if level == 1:
+                unique_parents = ['Level0']
+            else:
+                unique_parents = set([self.hierarchy[i][0] for i in self.hierarchy if self.hierarchy[i][1]==level])
             # iterating by parent at each level
             for parent_label in unique_parents:
                 level_name = f'Level_{level}_{parent_label}'
@@ -137,7 +129,7 @@ class Classifier(BaseEstimator, ClassifierMixin):
                     X_test = X.copy()
                 else:
                     parent = self.subtypeObjects[parent_label]
-                    prev_level = f'Level_{level-1}_{parent.parent.label}' if level > 2 else 'Level_1_None'
+                    prev_level = f'Level_{level-1}_{parent.parent.label}' if level > 2 else 'Level_1_Level0'
                     samples = self.getSamplesFromCall(parent.label, self.levels[prev_level]['calls_df'], self.levels[prev_level]['multi_calls'])
                     if not samples:
                         continue
@@ -152,8 +144,8 @@ class Classifier(BaseEstimator, ClassifierMixin):
                 for label_test in [i for i in self.hierarchy if self.hierarchy[i][1] == level]:
                     print(f'Testing {label_test}...')
 
-                    X_scaled = scaleForTesting(X_test, self.subtypeObjects[label_test].scaler)
-                    label_test_results = self.runTest(X_scaled, self.subtypeObjects[label_test].clf) # this is where the test is run
+                    X_scaled = scaleForTesting(X_test, self.scalers[parent_label])
+                    label_test_results = self.runTest(X_scaled, self.clfs[label_test]) # this is where the test is run
 
                     probs_raw_df[label_test] = [i[1] for i in label_test_results['proba']]
                     probs_adj_df[label_test] = probs_raw_df[label_test].apply(lambda x: self.adjustProb(x, self.labelThreshDict[label_test]))

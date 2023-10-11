@@ -21,12 +21,11 @@ Classes
 ---------------------------------------------------------------------------------------------------------------------'''
 
 class SubtypeClass:
-    def __init__(self, label, parent=None, clf=None, scaler=None):
+    def __init__(self, label, parent=None, clf=None):
         self.parent = parent
         self.label = label
         self.children = []
         self.clf = clf
-        self.scaler = scaler
         if parent is None:
             self.level = 1
         else:
@@ -44,29 +43,58 @@ class SubtypeClass:
         return results
     
     def deconstruct(self):
-        return {'clf':self.clf, 'scaler':self.scaler}
+        return {'clf':self.clf}
 
 ''' --------------------------------------------------------------------------------------------------------------------
 Functions
 ---------------------------------------------------------------------------------------------------------------------'''
 
-def reconstructSubtypeObj(subtypeObjectDeconstructed, hierarchy):
+def reconstructSubtypeObj(tallsorts_model_dict):
+    hierarchy = tallsorts_model_dict['hierarchy']
+    scalers = tallsorts_model_dict['scalers']
+    clfs = tallsorts_model_dict['clfs']
+
     nextLevel = hierarchy.copy()
     subtypeObjects = {}
     curLevel = 1
     while nextLevel:
         nextnextLevel = {}
-        for label in nextLevel.keys():
+        for label in nextLevel:
             if nextLevel[label][1] == curLevel:
-                if nextLevel[label][0] is None:
+                if nextLevel[label][1] == 1:
                     parent = None
                 else:
                     parent = subtypeObjects[nextLevel[label][0]]
                 subtypeObjects[label] = SubtypeClass(label, parent=parent, 
-                                                     clf=subtypeObjectDeconstructed[label]['clf'],
-                                                     scaler=subtypeObjectDeconstructed[label]['scaler'])
+                                                     clf=clfs[label])
             else:
                 nextnextLevel[label] = nextLevel[label]
         nextLevel = nextnextLevel.copy()
         curLevel += 1
     return subtypeObjects
+
+def genSubtypeObjsFromHierarchy(hierarchy):
+    subtypeObjects = {}
+    for label in hierarchy[hierarchy['Parent'] == ''].index:
+        subtypeObjects[label] = SubtypeClass(label, parent=None)
+    
+    for level in range(2, hierarchy.shape[0]+2):
+        remaining = [label for label in hierarchy.index if label not in subtypeObjects]
+        if not remaining:
+            break
+        for label in remaining:
+            parent_label = hierarchy.loc[label]['Parent']
+            if parent_label in subtypeObjects:
+                subtypeObjects[label] = SubtypeClass(label, parent=subtypeObjects[parent_label])
+
+    return subtypeObjects
+
+def gen_hierarchy_dict(subtypeObjects):
+    hierarchy_dict = {}
+    for label in subtypeObjects:
+        obj = subtypeObjects[label]
+        if obj.level == 1:
+            hierarchy_dict[label] = (None, 1)
+        else:
+            hierarchy_dict[label] = (obj.parent.label, obj.level)
+    return hierarchy_dict

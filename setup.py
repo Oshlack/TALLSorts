@@ -5,7 +5,7 @@ modules = ["TALLSorts." + p for p in sorted(find_packages("./TALLSorts"))]
 
 setup(
     name="TALLSorts",
-    version="0.0.2",
+    version="0.2",
     description="T-ALL Subtype Classifier/Investigator.",
     url="https://github.com/breons/TALLSorts",
     author="Allen Gu, Breon Schmidt",
