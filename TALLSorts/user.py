@@ -44,6 +44,7 @@ class UserInput:
             self.training_params = self.input.training_params if self.input.training_params else None
             self.training_cores = self.input.training_cores if self.input.training_cores else 1
             self.model_path = self.input.model_path if self.input.model_path else None
+            self.filter = self.input.filter if self.input.filter else False
 
             '''Gene labels'''
             self.gene_labels = self.input.gene_labels if self.input.gene_labels else 'id'
@@ -92,7 +93,7 @@ class UserInput:
                          required=False,
                          help=("""Path to TALLSorts-generated model file."""))
 
-        # testing arguments        
+        # training arguments        
         cli.add_argument('--sample-sheet', '--ss',
                          required=False,
                          help=("""Path to a binary 0/1 sample sheet with samples (rows) and labels (columns)"""))
@@ -100,6 +101,10 @@ class UserInput:
         cli.add_argument('--hierarchy',
                          required=False,
                          help=("""Path to a sheet containing hierarchy information for labels."""))
+        
+        cli.add_argument('--filter', '-f',
+                         required=False, action='store_true',
+                         help=("""Include flag if you wish to use TALLSort's default filtering method. If not included, assumes sample-sheet genes have already been filtered."""))
         
         cli.add_argument('--training-params', '--tp',
                          required=False,

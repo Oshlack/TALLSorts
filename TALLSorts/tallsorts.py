@@ -33,7 +33,7 @@ import pickle
 import csv
 import os
 import conorm
-from pyensembl import EnsemblRelease
+
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -459,6 +459,7 @@ def convert_symbols_to_ensembl(symb_list, path=False):
     """
 
     # generate a pyensembl genome object
+    from pyensembl import EnsemblRelease
     ensembl_data = EnsemblRelease(110)
 
     confirmed = {}
@@ -477,7 +478,7 @@ def convert_symbols_to_ensembl(symb_list, path=False):
     
     # process of elimination
     fixed = 1
-    print(f'Unconfirmed: {len(unconfirmed)}')
+    message(f'Unconfirmed: {len(unconfirmed)}')
     while fixed > 0:
         fixed = 0
         unconfirmed2 = []
@@ -492,7 +493,7 @@ def convert_symbols_to_ensembl(symb_list, path=False):
         unconfirmed = unconfirmed2.copy()
     unconfirmed += nonexistent
                 
-    print(f'Ensembl IDs found for {len(confirmed)} out of {len(symb_list)} genes.')
+    message(f'Ensembl IDs found for {len(confirmed)} out of {len(symb_list)} genes.')
     return {'confirmed':confirmed, 'unconfirmed':unconfirmed}
 
 def get_children_of_label(subtypeObjects, label_name):
@@ -589,7 +590,7 @@ def fit_classifier(ui, n_jobs=1):
     ### creating the scalers
     ###
 
-    def create_scalers(X, parent_label):
+    def create_scalers(X, parent_label, filter=True):
         if parent_label == 'Level0':
             children_labels = [i for i in subtypeObjects if subtypeObjects[i].level == 1]
         else:
@@ -597,13 +598,14 @@ def fit_classifier(ui, n_jobs=1):
             X = X.loc[subset_samples]
             children_labels = [i.label for i in subtypeObjects[parent_label].children]
 
-        min_subtype = min([sum(sample_sheet.loc[X.index][label] == 1) for label in children_labels])
-        X = X[filter_genes(X, min_subtype)]
+        if filter:
+            min_subtype = min([sum(sample_sheet.loc[X.index][label] == 1) for label in children_labels])
+            X = X[filter_genes(X, min_subtype)]
         scalers[parent_label] = createScaler(X)
     
     parent_labels = ['Level0'] + sorted([i for i in subtypeObjects if subtypeObjects[i].children], key=lambda x:subtypeObjects[x].level)
     with parallel_backend('threading', n_jobs=n_jobs):
-        Parallel(verbose=0)(delayed(create_scalers)(X, parent_label) for parent_label in parent_labels)
+        Parallel(verbose=0)(delayed(create_scalers)(X, parent_label, filter=ui.filter) for parent_label in parent_labels)
 
     ### performing model training
     ###
@@ -623,7 +625,7 @@ def fit_classifier(ui, n_jobs=1):
         logreg = LogisticRegression(**logreg_params)
         clf = logreg.fit(X_train, y_train)
         subtypeObjects[label].clf = clf
-        print(f'Trained label {label}')
+        message(f'Trained label {label}')
 
     with parallel_backend('threading', n_jobs=n_jobs):
         Parallel(verbose=1)(delayed(performing_training)(X, label, logreg_params[label]) for label in subtypeObjects)
@@ -718,7 +720,8 @@ def gen_logreg_params(training_params, subtypeObjects):
     
     return logreg_params
 
-def filter_genes(X, min_subtype, verbose=True):
+def filter_genes(X, min_subtype, verbose=False):
+    from pyensembl import EnsemblRelease
     ensembl_data = EnsemblRelease(110)
     
     candidate_genes = X.columns
