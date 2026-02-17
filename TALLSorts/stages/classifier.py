@@ -141,7 +141,12 @@ class Classifier(BaseEstimator, ClassifierMixin):
                 probs_adj_df = pd.DataFrame(index=X_test.index)
                 
                 # running test
-                for label_test in [i for i in self.hierarchy if self.hierarchy[i][1] == level]:
+                # THERE IS A BUG HERE RELATING TO HIERARCHIES! NEED TO LIMIT TO PARENTS
+                if level == 1:
+                    labels_to_test = [i for i in self.hierarchy if self.hierarchy[i][1] == 1]
+                else:
+                    labels_to_test = [i for i in self.hierarchy if (self.hierarchy[i][0] == parent_label and self.hierarchy[i][1] == level)]
+                for label_test in labels_to_test:
                     print(f'Testing {label_test}...')
 
                     X_scaled = scaleForTesting(X_test, self.scalers[parent_label])

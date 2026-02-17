@@ -156,3 +156,4 @@ tools/
 
 # for development use only
 test_output/
+tests/test_counts_small.csv

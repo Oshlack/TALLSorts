@@ -169,9 +169,17 @@ def run_predictions(ui, tallsorts):
         #     processed_counts = results.transform(ui.samples)
         #     processed_counts["counts"].to_csv(f'{ui.destination}/{level_cleaned}/processed_counts.csv')
 
-        get_figures(results_level=results.levels[level], 
-                    destination=f'{ui.destination}/{level_cleaned}', 
-                    label_list=get_children_of_label(tallsorts['clf'].subtypeObjects, level))
+    # generating plots
+    for level in results.levels:
+        level_cleaned = clean_label(level)
+        try:
+            # For some reason throws "ValueError for missing list objects"
+            get_figures(results_level=results.levels[level], 
+                        destination=f'{ui.destination}/{level_cleaned}', 
+                        label_list=get_children_of_label(tallsorts['clf'].subtypeObjects, level))
+        except Exception as e:
+            print(f'\tWARNING: {e}')
+            pass
     
     message("Finished. Thanks for using TALLSorts!")
     sys.exit()
@@ -228,15 +236,15 @@ def get_figures(results_level, destination, label_list, plots=["prob_scatter", "
     message("Saving figures...")
 
     for plot in plots:
-
+        # Currently not generating static PNGs due to a Kaleido versioning error
         if plot == "prob_scatter":
             dist_plot = gen_sample_wise_prob_plot(results_level['probs_raw_df'], results_level['calls_df'], label_list, labelThreshDict=None, batch_name=None, figsize=(800,600), return_plot=True)
-            dist_plot.write_image(destination + "/prob_scatters.png", scale=2, engine="kaleido")
+            # dist_plot.write_image(destination + "/prob_scatters.png", scale=2, engine='kaleido')
             dist_plot.write_html(destination + "/prob_scatters.html")
 
         if plot == "waterfalls":
             waterfall_plot = gen_waterfall_distribution(results_level['calls_df'], label_list, labelThreshDict=None, batch_name=None, return_plot=True)
-            waterfall_plot.write_image(destination + "/waterfalls.png", scale=2, engine="kaleido")
+            # waterfall_plot.write_image(destination + "/waterfalls.png", scale=2, engine='kaleido')
             waterfall_plot.write_html(destination + "/waterfalls.html")
         
 def gen_sample_wise_prob_plot(probs_raw_df, calls_df, label_list, labelThreshDict=None, batch_name=None, figsize=(800,600), return_plot=False):
@@ -276,7 +284,6 @@ def gen_sample_wise_prob_plot(probs_raw_df, calls_df, label_list, labelThreshDic
     Probability distribution figure.
 
     """
-
     if labelThreshDict is None:
         labelThreshDict = {i:0.5 for i in label_list}
 
@@ -382,7 +389,6 @@ def gen_waterfall_distribution(calls_df, label_list, labelThreshDict=None, batch
     Waterfalls figure.
 
     """
-
     if labelThreshDict is None:
         labelThreshDict = {i:0.5 for i in label_list}
 
