@@ -149,11 +149,12 @@ cython_debug/
 *.DS_Store
 
 # for development use, will be made available features are added over time (eg. training custom data)
-TALLSorts/data/
+data/
 generate_pipeline/
-TALLSorts/operations/
 tools/
 
 # for development use only
 test_output/
+tests/training_example/train_test_output
+tests/training_example/trained_model
 tests/test_counts_small.csv

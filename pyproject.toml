@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "TALLSorts"
+version = "0.3.0.dev0"
+description = "TALLSorts is a T-cell acute lymphoblastic leukaemia (T-ALL) subtype classifier, taking gene expression counts and making predictions into 8 subtypes (for now)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Allen Gu" },
+    { name = "Breon Schmidt" },
+]
+maintainers = [
+    { name = "Oshlack Lab" },
+]
+keywords = [
+    "bioinformatics",
+    "leukaemia",
+    "T-ALL",
+    "classifier",
+    "gene-expression",
+    "RNA-seq",
+    "subtype",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Healthcare Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+
+# Runtime dependencies. scikit-learn is pinned to 1.3.2 (loads and predicts with
+# the bundled 1.1.3-trained model, emitting only a cosmetic
+# InconsistentVersionWarning).
+dependencies = [
+    "numpy==1.26.4",
+    "pandas==2.2.3",
+    "scikit-learn==1.3.2",
+    "scipy==1.11.4",
+    "joblib==1.4.2",
+    "plotly==5.11.0",
+    "conorm==1.2.0",
+]
+
+[project.optional-dependencies]
+# pyensembl is only needed for gene-symbol input (--gene-labels symbol) and for
+# the default gene-filtering step during training (--filter). It is imported
+# lazily, requires a separate annotation download
+# (`pyensembl install --release 110 --species homo_sapiens`), and is therefore
+# kept out of the core install.
+symbol = ["pyensembl==2.2.9"]
+# Static image export of the Plotly figures (currently disabled in the code).
+images = ["kaleido==0.2.1"]
+all = ["pyensembl==2.2.9", "kaleido==0.2.1"]
+
+[project.urls]
+Homepage = "https://github.com/Oshlack/TAllSorts"
+Documentation = "https://github.com/Oshlack/TAllSorts/wiki"
+Repository = "https://github.com/Oshlack/TAllSorts"
+Issues = "https://github.com/Oshlack/TAllSorts/issues"
+Publication = "https://doi.org/10.1182/bloodadvances.2023010385"
+
+[project.scripts]
+tallsorts = "TALLSorts.tallsorts:run"
+TALLSorts = "TALLSorts.tallsorts:run"
+
+[tool.setuptools.packages.find]
+include = ["TALLSorts*"]
+
+# The trained default model lives inside the TALLSorts package but in a plain
+# (non-package) subdirectory, so it must be declared explicitly to be included
+# in the wheel.
+[tool.setuptools.package-data]
+TALLSorts = ["models/**/*.pkl.gz"]
