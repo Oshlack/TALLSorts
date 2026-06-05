@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "TALLSorts"
-version = "0.3.0.dev0"
+version = "0.3"
 description = "TALLSorts is a T-cell acute lymphoblastic leukaemia (T-ALL) subtype classifier, taking gene expression counts and making predictions into 8 subtypes (for now)."
 readme = "README.md"
 requires-python = ">=3.9"
