@@ -292,9 +292,10 @@ def gen_sample_wise_prob_plot(probs_raw_df, calls_df, label_list, labelThreshDic
 
     fig = go.Figure()
 
-    for i in range(n_samples):
-        sample = probs_raw_df.index[i]
-        sample_row = probs_raw_df.loc[sample]
+    # add bars
+    for sample_no in range(n_samples):
+        sample = probs_raw_df.index[sample_no]
+        sample_row = probs_raw_df.loc[sample][label_list]
         x = list(range(len(sample_row.index)))
         y = sample_row.to_list()
         customdata = [[sample, i] for i in sample_row.index]
